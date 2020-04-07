@@ -55,6 +55,9 @@ func TestAccDataSourceAzureRMPrivateDNSZone_withoutResourceGroupName(t *testing.
 		CheckDestroy: testCheckAzureRMPrivateDnsZoneDestroy,
 		Steps: []resource.TestStep{
 			{
+				Config: testAccDataSourcePrivateDNSZone_onlyNamePrep(data, resourceGroupName),
+			},
+			{
 				Config: testAccDataSourcePrivateDNSZone_onlyName(data, resourceGroupName),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(data.ResourceName, "resource_group_name", resourceGroupName),
@@ -114,7 +117,7 @@ data "azurerm_private_dns_zone" "test" {
 `, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
 }
 
-func testAccDataSourcePrivateDNSZone_onlyName(data acceptance.TestData, resourceGroupName string) string {
+func testAccDataSourcePrivateDNSZone_onlyNamePrep(data acceptance.TestData, resourceGroupName string) string {
 	return fmt.Sprintf(`
 provider "azurerm" {
   features {}
@@ -129,9 +132,16 @@ resource "azurerm_private_dns_zone" "test" {
   name                = "acctestzone%d.internal"
   resource_group_name = azurerm_resource_group.test.name
 }
+`, resourceGroupName, data.Locations.Primary, data.RandomInteger)
+}
+
+func testAccDataSourcePrivateDNSZone_onlyName(data acceptance.TestData, resourceGroupName string) string {
+	template := testAccDataSourcePrivateDNSZone_onlyNamePrep(data, resourceGroupName)
+	return fmt.Sprintf(`
+%s
 
 data "azurerm_private_dns_zone" "test" {
-  name = azurerm_private_dns_zone.test.name
+  name       = azurerm_private_dns_zone.test.name
 }
-`, resourceGroupName, data.Locations.Primary, data.RandomInteger)
+`, template)
 }

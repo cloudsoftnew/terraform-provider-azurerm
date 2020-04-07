@@ -3,6 +3,7 @@ package privatedns
 import (
 	"context"
 	"fmt"
+	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/helpers/azure"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/privatedns/mgmt/2018-09-01/privatedns"
@@ -75,64 +76,85 @@ func dataSourceArmPrivateDnsZoneRead(d *schema.ResourceData, meta interface{}) e
 	resourceGroup := d.Get("resource_group_name").(string)
 
 	var (
-		resp privatedns.PrivateZone
-		err  error
+		resp *privatedns.PrivateZone
 	)
 	if resourceGroup != "" {
-		resp, err = client.Get(ctx, resourceGroup, name)
+		zone, err := client.Get(ctx, resourceGroup, name)
 		if err != nil {
 			if utils.ResponseWasNotFound(resp.Response) {
 				return fmt.Errorf("Error: Private DNS Zone %q (Resource Group %q) was not found", name, resourceGroup)
 			}
 			return fmt.Errorf("error reading Private DNS Zone %q (Resource Group %q): %+v", name, resourceGroup, err)
 		}
+		resp = &zone
 	} else {
-		rgClient := meta.(*clients.Client).Resource.GroupsClient
+		resourcesClient := meta.(*clients.Client).Resource.ResourcesClient
 
-		resp, resourceGroup, err = findPrivateZone(client, rgClient, ctx, name)
+		zone, err := findPrivateZone(ctx, client, resourcesClient, name)
 		if err != nil {
 			return err
 		}
 
-		if resourceGroup == "" {
+		if zone == nil {
 			return fmt.Errorf("Error: Private DNS Zone %q was not found", name)
 		}
+
+		resp = &zone.zone
+		resourceGroup = zone.resourceGroup
 	}
 
 	d.Set("name", name)
 	d.Set("resource_group_name", resourceGroup)
 
-	if props := resp.PrivateZoneProperties; props != nil {
-		d.Set("number_of_record_sets", props.NumberOfRecordSets)
-		d.Set("max_number_of_record_sets", props.MaxNumberOfRecordSets)
-		d.Set("max_number_of_virtual_network_links", props.MaxNumberOfVirtualNetworkLinks)
-		d.Set("max_number_of_virtual_network_links_with_registration", props.MaxNumberOfVirtualNetworkLinksWithRegistration)
-	}
+	//if props := resp.PrivateZoneProperties; props != nil {
+	//	d.Set("number_of_record_sets", props.NumberOfRecordSets)
+	//	d.Set("max_number_of_record_sets", props.MaxNumberOfRecordSets)
+	//	d.Set("max_number_of_virtual_network_links", props.MaxNumberOfVirtualNetworkLinks)
+	//	d.Set("max_number_of_virtual_network_links_with_registration", props.MaxNumberOfVirtualNetworkLinksWithRegistration)
+	//}
 
 	return tags.FlattenAndSet(d, resp.Tags)
 }
 
-func findPrivateZone(client *privatedns.PrivateZonesClient, rgClient *resources.GroupsClient, ctx context.Context, name string) (privatedns.PrivateZone, string, error) {
-	groups, err := rgClient.List(ctx, "", nil)
+type privateDnsZone struct {
+	zone privatedns.PrivateZone
+	resourceGroup string
+}
+
+func findPrivateZone(ctx context.Context, client *privatedns.PrivateZonesClient, resourcesClient *resources.Client, name string) (*privateDnsZone, error) {
+	filter := fmt.Sprintf("resourceType eq 'Microsoft.Network/privateDnsZones' and name eq '%s'", name)
+	privateZones, err := resourcesClient.List(ctx, filter, "", nil)
+
 	if err != nil {
-		return privatedns.PrivateZone{}, "", fmt.Errorf("Error listing Resource Groups: %+v", err)
+		return nil, fmt.Errorf("Error listing Private DNS Zones: %+v", err)
 	}
 
-	for _, g := range groups.Values() {
-		resourceGroup := *g.Name
+	if len(privateZones.Values()) > 1 {
+		return nil, fmt.Errorf("More than one Private DNS Zone found with name: %q", name)
+	}
 
-		privateZones, err := client.ListByResourceGroup(ctx, resourceGroup, nil)
-		if err != nil {
-			//return privatedns.PrivateZone{}, "", fmt.Errorf("Error listing Private DNS Zones (Resource Group: %s): %+v", resourceGroup, err)
+	for _, z := range privateZones.Values() {
+		if z.ID == nil {
 			continue
 		}
 
-		for _, z := range privateZones.Values() {
-			if *z.Name == name {
-				return z, resourceGroup, nil
-			}
+		id, err := azure.ParseAzureResourceID(*z.ID)
+
+		if err != nil {
+			continue
 		}
+
+		zone, err := client.Get(ctx, id.ResourceGroup, name)
+
+		if err != nil {
+			return nil, fmt.Errorf("Error retrieving Private DNS Zone %q in resource group %q: %+v", name, id.ResourceGroup, err)
+		}
+
+		return &privateDnsZone{
+			zone: zone,
+			resourceGroup: id.ResourceGroup,
+		}, nil
 	}
 
-	return privatedns.PrivateZone{}, "", nil
+	return nil, fmt.Errorf("No Private DNS Zones found with name: %q", name)
 }
