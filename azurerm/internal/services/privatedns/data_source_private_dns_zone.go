@@ -117,7 +117,7 @@ func dataSourceArmPrivateDnsZoneRead(d *schema.ResourceData, meta interface{}) e
 }
 
 type privateDnsZone struct {
-	zone privatedns.PrivateZone
+	zone          privatedns.PrivateZone
 	resourceGroup string
 }
 
@@ -151,7 +151,7 @@ func findPrivateZone(ctx context.Context, client *privatedns.PrivateZonesClient,
 		}
 
 		return &privateDnsZone{
-			zone: zone,
+			zone:          zone,
 			resourceGroup: id.ResourceGroup,
 		}, nil
 	}
